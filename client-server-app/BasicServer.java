@@ -6,198 +6,228 @@
  * Based on https://docs.oracle.com/javase/tutorial/networking/sockets/clientServer.html
  */
 
+import java.io.*;
+import java.net.*;
+import java.util.*;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+
 import utils.Buffer;
 import utils.Request;
 
-import java.net.*;
-import java.io.*;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Scanner;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+/*
+ * Basic server able to receive client requests and respond to them adequately.
+ */
+public class BasicServer {
 
-public class SimpleServer {
-
+    /*
+     * Main method to launch the server.
+     * @param dbFilename : the path to the database text file
+     * @param portNumber : the port used to establish the connection with the client
+     * @param nbThreads : the number of threads wanted for the server
+     * @param resultFilename : the name for the file with all the results
+     * @return None
+     */
     public static void main(String[] args) throws IOException, InterruptedException {
-        if (args.length != 4 && args.length != 5) {
-            System.err.println("Usage: java SimpleServer <port number> <database text file> <number of threads> <verbose> [result text file]");
+        // Checking of the usage
+        if (args.length != 4) {
+            System.err.println("Usage: java BasicServer <database text file> <port number> <number of threads> <result filename>");
             System.exit(1);
         }
 
-        int portNumber = Integer.parseInt(args[0]);
-        String dbfile = args[1];
+        // Arguments recovery and server creation
         final int N_THREADS = Integer.parseInt(args[2]);
-        final boolean verbose = Boolean.parseBoolean(args[3]);
-        String resultsFile = (args.length == 5) ? args[4] : null;
+        String resultFilename = args[3];
+        BasicServer.BasicProtocol protocol = new BasicServer.BasicProtocol(fileToArray(args[0]));
+        ServerSocket serverSocket = new ServerSocket(Integer.parseInt(args[1]));
+        Buffer<Request> buf = new Buffer<>(20000); // Arbitrary buffer capacity of 20000
 
-        ServerSocket serverSocket = new ServerSocket(portNumber);
-        Buffer<Request> buffer = new Buffer<>(10000);
-        SimpleServer.SimpleServerProtocol ssp = new SimpleServer.SimpleServerProtocol(initArray(dbfile));
+        // Lists to store the time for the queue and for the service
+        List<Long> qTime = new ArrayList<>();
+        List<Long> sTime = new ArrayList<>();
 
-        if (verbose)
-            System.out.println("Server is up at "+InetAddress.getLocalHost());
-
+        // client read and write for the requests
         Socket clientSocket = serverSocket.accept();
-        PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
-        BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+        BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+        PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true);
 
-        List<Long> queueTimes = new ArrayList<>();
-        List<Long> serviceTimes = new ArrayList<>();
+        System.out.println("Basic server started at " + InetAddress.getLocalHost());
 
-
-        // Initializing worker threads
+        // Definition of the threads
         Thread[] threads = new Thread[N_THREADS];
-        for (int i=0; i < N_THREADS; i++) {
+        for (int i=0; i<N_THREADS; i++) {
             threads[i] = new Thread(() -> {
                 try {
-                    Request r;
-                    while ((r = buffer.take()) != null) {
-                        if (r.getRequestValue().equals("Done")) break;
-                        r.setFinishedQueuingTime(new Date());
-                        r.setStartingToTreatRequestTime(new Date());
-                        String outputLine = ssp.processInput(r.getRequestValue());
-                        r.setFinishedTreatingRequestTime(new Date());
-                        if (r.getSentByClientTime() != null) {
-                            outputLine = r.getSentByClientTime().getTime() + ";" + outputLine;
+                    Request request = buf.take();
+                    while (request != null) {
+                        String value = request.getReqValue();
+
+                        // Signal to stop the thread
+                        if (value.equals("Stop")) break;
+
+                        request.endWait(new Date());
+                        request.startTreat(new Date());
+                        String output = request.getSentByClient().getTime() + ";" + protocol.process(value);
+                        request.endTreat(new Date());
+
+                        qTime.add(request.waitTime());
+                        sTime.add(request.treatTime());
+
+                        synchronized (writer) {
+                            writer.println(output);
+                            writer.flush();
                         }
-                        synchronized (out) {
-                            out.println(outputLine);
-                            out.flush();
-                        }
-                        if (resultsFile != null) {
-                            logResponse(r.computeQueuingTime(), queueTimes);
-                            logResponse(r.computeServiceTime(), serviceTimes);
-                        }
+
+                        request = buf.take();
                     }
+
                 } catch (InterruptedException e) {
                     System.err.println(e.getMessage());
                 }
             });
-            // starting the threads right away
             threads[i].start();
+            System.out.println("Thread " + i + " started !");
         }
 
-        // Loop to fill buffer
+        // Read lines and attribute requests to threads
         try {
-            String fromClient;
-            while ((fromClient = in.readLine()) != null) {
-                Request received;
-                if (resultsFile != null) {
-                    String[] splitRequest = fromClient.split(";", 2);
-                    received = new Request(splitRequest[1]);
-                    received.setSentByClientTime(new Date(Long.parseLong(splitRequest[0])));
-                } else {
-                    received = new Request(fromClient);
-                }
-                received.setStartingQueuingTime(new Date());
-                if (!buffer.add(received)) System.err.println("Full buffer, had to drop a request");
+            String line = reader.readLine();
+            while (line != null) {
+                String[] splitLine = line.split(";", 2);
+                Request request = new Request(splitLine[1]);
+                request.setSentByClient(new Date(Long.parseLong(splitLine[0])));
+                request.startWait(new Date());
+
+                if (!buf.add(request)) System.err.println("The buffer is full, a request has been dropped !");
+
+                line = reader.readLine();
             }
+
+            // Adds final stop messages to all the threads
             for (int i = 0; i < N_THREADS; i++) {
-                if (!buffer.add(new Request("Done"))) System.err.println("Could not stop a thread");
+                if (!buf.add(new Request("Stop"))) System.err.println("A thread is unstoppable !");
             }
+
         } catch (IOException e) {
             System.err.println(e.getMessage());
         }
 
-        // Waiting for the threads to finish to return
+        // Waits all the threads to finish
         for (int i = 0; i < N_THREADS; i++) {
             threads[i].join();
         }
 
-        in.close();
-        out.close();
+        // Close everything
+        writer.close();
+        reader.close();
         serverSocket.close();
         clientSocket.close();
 
-        if (resultsFile != null) {
-            writeResultsFile(queueTimes, resultsFile+"_queue.txt", verbose);
-            writeResultsFile(serviceTimes, resultsFile+"_service.txt", verbose);
-        }
+        // Writes the results to output files
+        writeResults(qTime, resultFilename+"_queue.txt");
+        writeResults(sTime, resultFilename+"_service.txt");
 
     }
 
-    public static synchronized void logResponse(long time, List<Long> times) {
-        times.add(time);
-    }
-
-    public static void writeResultsFile(List<Long> resultsList, String outputFilename, boolean verbose) {
+    /*
+     * Reads the file and adds all the lines to a list of strings.
+     * @param filename : the file from which to read the lines
+     * @return array : an array of the strings (lines) in the file
+     */
+    public static String[][] fileToArray(String filename) {
         try {
-            FileWriter outputWriter = new FileWriter(outputFilename);
-            for (long line : resultsList) {
-                outputWriter.write(line+"\n");
+            String[] lines;
+            ArrayList<String[]> list = new ArrayList<>();
+            File file = new File(filename);
+            Scanner cursor = new Scanner(file);
+
+            while (cursor.hasNextLine()) {
+                lines = cursor.nextLine().split("@@@");
+                list.add(lines);
             }
-            outputWriter.close();
-            if (verbose)
-                System.out.println("Saved results to "+outputFilename);
+
+            cursor.close();
+            System.out.println("Lines read from " + filename);
+            return list.toArray(new String[list.size()][list.get(0).length]);
+
+        } catch (FileNotFoundException e) {
+            System.err.println("Error with the file to read !");
+            return null;
+        }
+    }
+
+    /*
+     * Writes the results of the list in the file.
+     * @param resultsList : list of results
+     * @param fileName : the file where to write the results
+     * @return None
+     */
+    public static void writeResults(List<Long> resultsList, String filename) {
+        try {
+            FileWriter writer = new FileWriter(filename);
+            for (long line : resultsList) {
+                writer.write(line+"\n");
+            }
+            writer.close();
+            System.out.println("Results written in " + filename);
         } catch (IOException e) {
             System.err.println(e.getMessage());
         }
     }
 
-    public static String[][] initArray(String filename) {
-        try {
-            ArrayList<String[]> list = new ArrayList<>();
-            File file = new File(filename);
 
-            Scanner reader = new Scanner(file);
-            String[] data;
-            while (reader.hasNextLine()) {
-                data = reader.nextLine().split("@@@");
-                list.add(data);
+    /*
+     * Internal class to process the requests of the server.
+     */
+    public static class BasicProtocol {
+        private final String[][] DBLines;
+
+        /*
+         * Constructs an object BasicProtocol with the lines of the database given.
+         * @param DBlines : the lines of the database
+         * @return None
+         */
+        public BasicProtocol(String[][] lines) {
+            this.DBLines = lines;
+        }
+
+        /*
+         * Process the request with the database and returns the adequate response.
+         * @param request : the request to process
+         * @return response : the response to the request
+         */
+        public String process(String request) {
+            if (request == null) return null;
+
+            String[] splitRequest = request.split(";", 2);
+            if (splitRequest.length != 2) {
+                System.err.println("The request format is incorrect ! Process : impossible !");
+                return null;
             }
-            reader.close();
+            String[] types = splitRequest[0].split(",");
+            String regex = splitRequest[1];
+            Pattern pattern = Pattern.compile(regex);
 
-            return list.toArray(new String[list.size()][list.get(0).length]);
-
-        } catch (FileNotFoundException e) {
-            System.err.println("No such file");
-            return null;
-        }
-    }
-
-    public static class SimpleServerProtocol {
-        private final String[][] dataArray;
-
-        public SimpleServerProtocol(String[][] dataArray) {
-            this.dataArray = dataArray;
-        }
-
-        public String processInput(String command) {
-            if (command != null) {
-                String[] data = command.split(";", 2);
-                if (data.length != 2) {
-                    System.err.println("Wrong command format.");
-                    return null;
-                }
-                String[] types = data[0].split(",");
-                String regex = data[1];
-                Pattern pattern = Pattern.compile(regex);
-
-                StringBuilder toSend = new StringBuilder();
-                for (int i = 0; i < this.dataArray.length; i++) {
-                    if (types.length == 0) {
-                        Matcher matcher = pattern.matcher(this.dataArray[i][1]);
-                        if (matcher.find()) {
-                            toSend.append(this.dataArray[i][0]).append("@@@").append(this.dataArray[i][1]).append("\n");
-                        }
-                    } else {
-                        for (String type : types) {
-                            if (this.dataArray[i][0].equals(type)) {
-                                Matcher matcher = pattern.matcher(this.dataArray[i][1]);
-                                if (matcher.find()) {
-                                    toSend.append(this.dataArray[i][0]).append("@@@").append(this.dataArray[i][1]).append("\n");
-                                    break;
-                                }
+            StringBuilder response = new StringBuilder();
+            for (int i = 0; i < this.DBLines.length; i++) {
+                if (types.length == 0) {
+                    Matcher matcher = pattern.matcher(this.DBLines[i][1]);
+                    if (matcher.find()) {
+                        response.append(this.DBLines[i][0]).append("@@@").append(this.DBLines[i][1]).append("\n");
+                    }
+                } else {
+                    for (String type : types) {
+                        if (this.DBLines[i][0].equals(type)) {
+                            Matcher matcher = pattern.matcher(this.DBLines[i][1]);
+                            if (matcher.find()) {
+                                response.append(this.DBLines[i][0]).append("@@@").append(this.DBLines[i][1]).append("\n");
+                                break;
                             }
                         }
                     }
                 }
-                return toSend.toString();
-            } else {
-                return null;
             }
+            return response.toString();
         }
     }
 }

@@ -6,16 +6,24 @@
  * Based on https://docs.oracle.com/javase/tutorial/networking/sockets/clientServer.html
  */
 
+
+import java.io.*;
+import java.net.*;
+//import java.util.*;
+import java.util.List;
+import java.util.Date;
+import java.util.Scanner;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Set;
+import java.util.Map;
+import java.util.HashSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import utils.Buffer;
 import utils.Request;
 import utils.Cache;
-
-import java.net.*;
-import java.io.*;
-import java.util.*;
-
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class OptimizedServer {
 
@@ -53,21 +61,21 @@ public class OptimizedServer {
                 try {
                     Request r;
                     while ((r = buffer.take()) != null) {
-                        if (r.getRequestValue().equals("Done")) break;
-                        r.setFinishedQueuingTime(new Date());
-                        r.setStartingToTreatRequestTime(new Date());
-                        String outputLine = osp.processInput(r.getRequestValue());
-                        r.setFinishedTreatingRequestTime(new Date());
-                        if (r.getSentByClientTime() != null) {
-                            outputLine = r.getSentByClientTime().getTime() + ";" + outputLine;
+                        if (r.getReqValue().equals("Done")) break;
+                        r.endWait(new Date());
+                        r.startTreat(new Date());
+                        String outputLine = osp.processInput(r.getReqValue());
+                        r.endTreat(new Date());
+                        if (r.getSentByClient() != null) {
+                            outputLine = r.getSentByClient().getTime() + ";" + outputLine;
                         }
                         synchronized (out) {
                             out.println(outputLine);
                             out.flush();
                         }
                         if (resultsFile != null) {
-                            logResponse(r.computeQueuingTime(), queueTimes);
-                            logResponse(r.computeServiceTime(), serviceTimes);
+                            logResponse(r.treatTime(), queueTimes);
+                            logResponse(r.waitTime(), serviceTimes);
                         }
                     }
                 } catch (InterruptedException e) {
@@ -86,11 +94,11 @@ public class OptimizedServer {
                 if (resultsFile != null) {
                     String[] splitRequest = fromClient.split(";", 2);
                     received = new Request(splitRequest[1]);
-                    received.setSentByClientTime(new Date(Long.parseLong(splitRequest[0])));
+                    received.setSentByClient(new Date(Long.parseLong(splitRequest[0])));
                 } else {
                     received = new Request(fromClient);
                 }
-                received.setStartingQueuingTime(new Date());
+                received.startWait(new Date());
                 if (!buffer.add(received)) System.err.println("Full buffer, had to drop a request");
             }
             for (int i = 0; i < N_THREADS; i++) {

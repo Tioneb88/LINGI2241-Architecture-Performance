@@ -7,18 +7,18 @@
  */
 
 
-import java.io.*;
-import java.net.*;
 import java.util.*;
+import java.net.*;
+import java.io.*;
 
-public class Clients {
+public class Client {
 
-    static Random rand;
+    static Random seed;
 
     public static void main(String[] args) {
-        // parse args
+        // Checking of the usage
         if (args.length != 6 && args.length != 7) {
-            System.err.println("Usage: java Clients <host name> <port number> <number of clients> <input file> <mean delay> <verbose> [results file]");
+            System.err.println("Usage: java Client <host name> <port number> <number of clients> <input file> <mean delay> <verbose> [results file]");
             System.exit(1);
         }
 
@@ -33,7 +33,7 @@ public class Clients {
 
         final List<Long> resultsList = new ArrayList<>();
 
-        rand = new Random();
+        seed = new Random();
 
         Thread[] threads = new Thread[numberOfClients];
 
@@ -139,7 +139,7 @@ public class Clients {
 
 
     public static double exponential(float lambda) {
-        return Math.log(1-rand.nextDouble())/(-lambda);
+        return Math.log(1-seed.nextDouble())/(-lambda);
     }
 
     public static synchronized void logResponse(long time, List<Long> resultsList) {

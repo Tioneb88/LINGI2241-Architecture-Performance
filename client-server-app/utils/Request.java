@@ -1,87 +1,71 @@
 package utils;
 
-import java.io.Serializable;
 import java.util.Date;
+import java.io.Serializable;
+
+
 public class Request implements Serializable {
 
-    private String requestValue;
-    private String responseValue;
+    private String reqValue;
+    private String respValue;
+    private Date sentByClient;
+    private Date receivedByClient;
+    private Date startTreatTime;
+    private Date endTreatTime;
+    private Date startWaitTime;
+    private Date endWaitTime;
 
-    private Date startingToTreatRequestTime;
-    private Date startingQueuingTime;
-    private Date finishedQueuingTime;
-    private Date finishedTreatingRequestTime;
-    private Date sentByClientTime;
-    private Date receivedByClientTime;
 
-
-    private long processingTime;
-    private long queuingTime;
-    private long serviceTime;
-
-    public Request(String requestValue) {
-        this.requestValue = requestValue;
+    public Request(String value) {
+        this.reqValue = value;
     }
 
-    public String getRequestValue() {
-        return requestValue;
+    public String getReqValue() {
+        return reqValue;
     }
 
-    public void setRequestValue(String requestValue) {
-        this.requestValue = requestValue;
+    public void setResponseValue(String value) {
+        this.respValue = value;
     }
 
-    public String getResponseValue() {
-        return responseValue;
+    public void startWait(Date time) {
+        this.startWaitTime = time;
     }
 
-    public void setStartingQueuingTime(Date startingQueuingTime) {
-        this.startingQueuingTime = startingQueuingTime;
+    public void endWait(Date time) {
+        this.endWaitTime = time;
     }
 
-
-    public void setFinishedQueuingTime(Date finishedQueuingTime) {
-        this.finishedQueuingTime = finishedQueuingTime;
+    public void startTreat(Date time) {
+        this.startTreatTime = time;
     }
 
-    public void setStartingToTreatRequestTime(Date startingToTreatRequestTime) {
-        this.startingToTreatRequestTime = startingToTreatRequestTime;
+    public void endTreat(Date time) {
+        this.endTreatTime = time;
     }
 
-    public void setFinishedTreatingRequestTime(Date finishedTreatingRequestTime) {
-        this.finishedTreatingRequestTime = finishedTreatingRequestTime;
+    public void setSentByClient(Date sentByClientTime) {
+        this.sentByClient = sentByClientTime;
     }
 
-    public void setSentByClientTime(Date sentByClientTime) {
-        this.sentByClientTime = sentByClientTime;
+    public Date getSentByClient() {
+        return sentByClient;
     }
 
     public Date getReceivedByClientTime() {
-        return receivedByClientTime;
+        return receivedByClient;
     }
 
     public void setReceivedByClientTime(Date receivedByClientTime) {
-        this.receivedByClientTime = receivedByClientTime;
+        this.receivedByClient = receivedByClientTime;
     }
 
-
-    public void setResponseValue(String responseValue) {
-        this.responseValue = responseValue;
+    public long waitTime() {
+        return this.endWaitTime.getTime() - this.startWaitTime.getTime();
     }
 
-    public long computeQueuingTime() {
-        this.queuingTime = this.finishedQueuingTime.getTime() - this.startingQueuingTime.getTime();
-        return this.queuingTime;
+    public long treatTime() {
+        return this.endTreatTime.getTime() - this.startTreatTime.getTime();
     }
-
-    public long computeServiceTime() {
-        this.serviceTime = this.finishedTreatingRequestTime.getTime() - this.startingToTreatRequestTime.getTime();
-        return this.serviceTime;
-    }
-
-    public Date getSentByClientTime() {
-        return sentByClientTime;
-    }
-
 
 }

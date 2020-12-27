@@ -15,9 +15,4 @@ public class Buffer<T> extends LinkedBlockingDeque<T> {
         }
         return false;
     }
-
-    public synchronized boolean isFull() {
-        return this.remainingCapacity() == 0;
-    }
-
 }
