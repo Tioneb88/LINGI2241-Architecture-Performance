@@ -11,169 +11,187 @@ import java.util.*;
 import java.net.*;
 import java.io.*;
 
+/*
+ * Client able to send requests to the server and treat responses.
+ */
 public class Client {
 
     static Random seed;
 
+    /*
+     * Main method to launch the client.
+     * @param inputFilename : file from where to read the requests
+     * @param hostName : name of the server to use
+     * @param portNumber : the port used to establish the connection with the server
+     * @param nbClients : the number of clients wanted for the server
+     * @param meanDelay : delay for the exponential distribution
+     * @param resultFilename : the name for the file with all the results
+     * @return None
+     */
     public static void main(String[] args) {
+        // seed for the exponential distribution
+        seed = new Random();
+
         // Checking of the usage
-        if (args.length != 6 && args.length != 7) {
-            System.err.println("Usage: java Client <host name> <port number> <number of clients> <input file> <mean delay> <verbose> [results file]");
+        if (args.length != 6) {
+            System.err.println("Usage: java Client <input filename> <host name> <port number> <number of clients> <mean delay> <result filename>");
             System.exit(1);
         }
 
-        String hostName = args[0];
-        int portNumber = Integer.parseInt(args[1]);
-        int numberOfClients = Integer.parseInt(args[2]);
-        String inputFilename = args[3];
-        float meanDelay = Float.parseFloat(args[4]);
-        boolean verbose = Boolean.parseBoolean(args[5]);
-        String outputFilename = (args.length == 7) ? args[6] : null;
-        boolean saveTime = outputFilename != null;
+        // Arguments recovery and client creation
+        List<String> requests = fileToList(args[0]);
+        final List<Long> results = new ArrayList<>();
+        int nbClients = Integer.parseInt(args[3]);
+        float lambda = 1/Float.parseFloat(args[4]);
+        String outputFilename = args[5];
 
-        final List<Long> resultsList = new ArrayList<>();
-
-        seed = new Random();
-
-        Thread[] threads = new Thread[numberOfClients];
-
-        List<String> requests = generateRequestList(inputFilename);
-
-        int totalRequests = requests.size() * numberOfClients;
-
+        // Definition and execution of the client threads
+        Thread[] threads = new Thread[nbClients];
         try (
-            final Socket socket = new Socket(hostName, portNumber);
-            final PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-            final BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            // client read and write for the requests
+            final Socket clientSocket = new Socket(args[1], Integer.parseInt(args[2]));
+            final BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+            final PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true);
         ) {
-            for (int i = 0; i<numberOfClients; i++){
-                final int idx = i;
-
-                // handle sending to server
+            // Definition of the sending threads
+            for (int i = 0; i<nbClients; i++) {
                 threads[i] = new Thread(() -> {
                     try {
-                        Thread sendingThread = new Thread(() -> {
-                            List<String> requestsForThread = new ArrayList<>(requests);
-                            Collections.shuffle(requestsForThread);
+                        Thread thread = new Thread(() -> {
+                            List<String> threadRequests = new ArrayList<>(requests);
+                            Collections.shuffle(threadRequests);
 
-                            for (String r : requestsForThread){
+                            for (String request : threadRequests) {
                                 try {
-                                    Thread.sleep((long) exponential(1/meanDelay));
-                                    if (saveTime) {
-                                        r = new Date().getTime() + ";" + r;
+                                    // simulate inter-arrival time
+                                    Thread.sleep((long) exponential(lambda));
+
+                                    request = new Date().getTime() + ";" + request;
+
+                                    synchronized (writer) {
+                                        writer.println(request);
                                     }
-                                    synchronized (out) {
-                                        out.println(r);
-                                    }
+
                                 } catch (InterruptedException e){
                                     System.err.println(e.getMessage());
                                 }
                             }
                         });
-
-                        sendingThread.start();
-                        sendingThread.join();
+                        thread.start();
+                        thread.join();
 
                     } catch (InterruptedException e) {
                         System.err.println(e.getMessage());
                     }
                 });
-
                 threads[i].start();
             }
 
-            Thread receivingThread = new Thread(() -> {
-                int doneCount = 0;
+            // Definition of the receiving threads
+            Thread thread = new Thread(() -> {
                 try {
-                    String fromServer;
-                    int requestCount = 0;
-                    boolean newResponse = true;
-                    while ((fromServer = in.readLine()) != null) {
-                        requestCount++;
-                        if (saveTime && newResponse) {
-                            long finishingTime = new Date().getTime();
-                            String[] splitResponse = fromServer.split(";", 2);
-                            long timeStamp = Long.parseLong(splitResponse[0]);
-                            fromServer = splitResponse[1];
-                            newResponse = false;
-                            logResponse(finishingTime - timeStamp, resultsList);
+                    String line = reader.readLine();
+                    int count = 0;
+                    boolean resp = true;
+
+                    while (line != null) {
+
+                        if (resp) {
+                            resp = false;
+                            String[] splitResponse = line.split(";", 2);
+                            results.add(new Date().getTime() - Long.parseLong(splitResponse[0]));
+                            line = splitResponse[1];
                         }
 
-                        if (fromServer.equals("")) {
-                            doneCount++;
-                            newResponse = true;
-                            if (verbose) {
-                                System.out.println("Received Server Response of length : " + (requestCount - 1));
-                                //System.out.println("Received Server Response : \n" + fromServer);
-                            }
-                            requestCount = 0;
+                        if (line.equals("")) {
+                            resp = true;
+                            count++;
                         }
 
-                        if (doneCount == totalRequests)
+                        if (count == requests.size() * nbClients)
                             break;
 
+                        line = reader.readLine();
                     }
-                    if (verbose)
-                        System.out.println("All clients finished");
+
                 } catch (IOException e) {
                     System.err.println(e.getMessage());
                     System.exit(1);
                 }
             });
+            thread.start();
 
-            receivingThread.start();
-
-            for (Thread thread : threads) {
-                thread.join();
+            for (Thread t : threads) {
+                t.join();
             }
-            receivingThread.join();
+
+            thread.join();
 
         } catch (IOException | InterruptedException e) {
             System.err.println(e.getMessage());
             System.exit(1);
         }
+        saveResults(results, outputFilename + ".txt");
 
-        writeResultsFile(resultsList, outputFilename+".txt", verbose);
-
+        System.out.println("All clients finished !");
     }
 
 
+    /*
+     * Reads the file and adds all the lines to a list of strings.
+     * @param filename : the file from which to read the lines
+     * @return list : a list of the strings (lines) in the file
+     */
+    public static List<String> fileToList(String filename) {
+        try {
+            String line;
+            List<String> list = new ArrayList<>();
+            Scanner cursor = new Scanner(new File(filename));
+
+            while (cursor.hasNext()) {
+                if ((line = cursor.nextLine()) != null) ;
+                list.add(line);
+            }
+
+            cursor.close();
+            System.out.println("Lines read from " + filename);
+            return list;
+
+        } catch (IOException e) {
+            System.err.println("Error with the file to read !");
+            return null;
+        }
+    }
+
+    /*
+     * Simulates an exponential distribution.
+     * @param lambda : the parameter of the distribution
+     * @return time : the time to wait according to the distribution and the seed
+     */
     public static double exponential(float lambda) {
         return Math.log(1-seed.nextDouble())/(-lambda);
     }
 
-    public static synchronized void logResponse(long time, List<Long> resultsList) {
-        resultsList.add(time);
-    }
-
-    public static void writeResultsFile(List<Long> resultsList, String outputFilename, boolean verbose) {
+    /*
+     * Saves the results of the list in the file.
+     * @param list : list of results
+     * @param fileName : the file where to write the results
+     * @return None
+     */
+    public static void saveResults(List<Long> list, String filename) {
         try {
-            FileWriter outputWriter = new FileWriter(outputFilename);
-            for (long line : resultsList) {
-                outputWriter.write(line+"\n");
+            FileWriter writer = new FileWriter(filename);
+
+            for (long line : list) {
+                writer.write(line + "\n");
             }
-            outputWriter.close();
-            if (verbose)
-                System.out.println("Saved results to "+outputFilename);
+
+            writer.close();
+            System.out.println("Results written in " + filename);
+
         } catch (IOException e) {
             System.err.println(e.getMessage());
         }
     }
 
-    public static List<String> generateRequestList(String inputFilename) {
-        List<String> requests = new ArrayList<>();
-        try (
-            final Scanner inputScanner = new Scanner(new File(inputFilename));
-        ) {
-            String line;
-            while (inputScanner.hasNext()) {
-                if ((line = inputScanner.nextLine()) != null)
-                    requests.add(line);
-            }
-            return requests;
-        } catch (IOException e) {
-            System.err.println("Empty file or file not found");
-            return requests;
-        }
-    }
 }

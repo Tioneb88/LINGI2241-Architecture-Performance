@@ -1,65 +1,89 @@
 package utils;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.HashMap;
 
+/*
+ * Small class to manage a simple cache.
+ */
 public class Cache {
-    private final int N;
-    private final float theta;
-    private final Map<String, CacheEntry> map;
+    private final Map<String, Entry> hashmap;
+    private final int size;
+    private final float threshold;
 
-    public Cache(int N, float theta) {
-        this.N = N;
-        this.theta = theta;
-        this.map = new HashMap<>();
+    /*
+     * Constructs an object Cache with a size and a threshold.
+     * @param size : the maximal size of the cache
+     * @param threshold : the maximal threshold of frequency
+     * @return None
+     */
+    public Cache(int size, float threshold) {
+        this.hashmap = new HashMap<>();
+        this.size = size;
+        this.threshold = threshold;
     }
 
+    /*
+     * Adds a new element in the cache.
+     * @param request : the request linked to the new addition
+     * @param response : the response corresponding to the request
+     * @return None
+     */
     public synchronized void add(String request, String response) {
-        if (map.size() >= this.N) {
-            // getting frequency total and getting lowest frequency key
-            int totalFreq = 0;
+        // If the cache is full
+        if (hashmap.size() >= this.size) {
+            String leastFreq = null;
             int minFreq = Integer.MAX_VALUE;
-            String toDel = null;
 
-            for (Map.Entry<String, CacheEntry> entry  : map.entrySet()) {
-                totalFreq += entry.getValue().freq;
+            // The least frequent element is removed
+            int sumFreq = 0;
+            for (Map.Entry<String, Entry> entry : hashmap.entrySet()) {
+                sumFreq += entry.getValue().freq;
                 if (entry.getValue().freq < minFreq) {
-                    toDel = entry.getKey();
+                    leastFreq = entry.getKey();
                 }
             }
+            hashmap.remove(leastFreq);
 
-            // reducing frequency if threshold is crossed
-            if (totalFreq/(float) map.size() > this.theta) {
-                for (CacheEntry ce : map.values()) {
-                    ce.freq /= 2;
+            // The frequencies are adjusted if the threshold is reached
+            if (sumFreq/(float) hashmap.size() > this.threshold) {
+                for (Entry entry : hashmap.values()) {
+                    entry.freq /= 2;
                 }
             }
-
-            // Removing the lowest frequency item
-            map.remove(toDel);
         }
-
-        // Adding the new element
-        map.put(request, new CacheEntry(response, 1));
+        hashmap.put(request, new Entry(response, 1));
     }
 
-    // Returns the response to the request if the object is in cache, null otherwise
+    /*
+     * Gets the response corresponding to the request if it is in the cache, otherwise null.
+     * @param request : the request searched
+     * @return response : corresponding to the request or null if the request is not in the cache
+     */
     public String get(String request) {
-        if (map.containsKey(request)) {
-            CacheEntry ce = map.get(request);
-            ce.freq += 1;
-            return ce.response;
+        if (hashmap.containsKey(request)) {
+            Entry entry = hashmap.get(request);
+            entry.freq += 1;
+            return entry.response;
         } else {
             return null;
         }
     }
 
-    // Object we are storing in the cache (contains the response and the frequency)
-    public static class CacheEntry {
+    /*
+     * Internal class of the objects stored in the cache.
+     */
+    public static class Entry {
         public String response;
         public int freq;
 
-        public CacheEntry(String response, int freq) {
+        /*
+         * Constructs an object Entry with a response and a frequency
+         * @param response : the element to store
+         * @param freq : the frequency of the request for this element
+         * @return None
+         */
+        public Entry(String response, int freq) {
             this.response = response;
             this.freq = freq;
         }

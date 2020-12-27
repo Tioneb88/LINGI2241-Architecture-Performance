@@ -28,7 +28,7 @@ public class BasicServer {
      * @param resultFilename : the name for the file with all the results
      * @return None
      */
-    public static void main(String[] args) throws IOException, InterruptedException {
+    public static void main(String[] args) throws InterruptedException, IOException {
         // Checking of the usage
         if (args.length != 4) {
             System.err.println("Usage: java BasicServer <database text file> <port number> <number of threads> <result filename>");
@@ -60,7 +60,7 @@ public class BasicServer {
                 try {
                     Request request = buf.take();
                     while (request != null) {
-                        String value = request.getReqValue();
+                        String value = request.getValue();
 
                         // Signal to stop the thread
                         if (value.equals("Stop")) break;
@@ -124,9 +124,10 @@ public class BasicServer {
         clientSocket.close();
 
         // Writes the results to output files
-        writeResults(qTime, resultFilename+"_queue.txt");
-        writeResults(sTime, resultFilename+"_service.txt");
+        saveResults(qTime, resultFilename + "_queue.txt");
+        saveResults(sTime, resultFilename + "_service.txt");
 
+        System.out.println("Basic server finished !");
     }
 
     /*
@@ -136,40 +137,42 @@ public class BasicServer {
      */
     public static String[][] fileToArray(String filename) {
         try {
-            String[] lines;
+            String[] line;
             ArrayList<String[]> list = new ArrayList<>();
-            File file = new File(filename);
-            Scanner cursor = new Scanner(file);
+            Scanner cursor = new Scanner(new File(filename));
 
             while (cursor.hasNextLine()) {
-                lines = cursor.nextLine().split("@@@");
-                list.add(lines);
+                line = cursor.nextLine().split("@@@");
+                list.add(line);
             }
 
             cursor.close();
             System.out.println("Lines read from " + filename);
             return list.toArray(new String[list.size()][list.get(0).length]);
 
-        } catch (FileNotFoundException e) {
+        } catch (IOException e) {
             System.err.println("Error with the file to read !");
             return null;
         }
     }
 
     /*
-     * Writes the results of the list in the file.
-     * @param resultsList : list of results
-     * @param fileName : the file where to write the results
+     * Saves the results of the list in the file.
+     * @param list : list of results
+     * @param filename : the file where to write the results
      * @return None
      */
-    public static void writeResults(List<Long> resultsList, String filename) {
+    public static void saveResults(List<Long> list, String filename) {
         try {
             FileWriter writer = new FileWriter(filename);
-            for (long line : resultsList) {
-                writer.write(line+"\n");
+
+            for (long line : list) {
+                writer.write(line + "\n");
             }
+
             writer.close();
             System.out.println("Results written in " + filename);
+
         } catch (IOException e) {
             System.err.println(e.getMessage());
         }
@@ -204,10 +207,13 @@ public class BasicServer {
                 System.err.println("The request format is incorrect ! Process : impossible !");
                 return null;
             }
+
+            // Preparation and extraction
             String[] types = splitRequest[0].split(",");
             String regex = splitRequest[1];
             Pattern pattern = Pattern.compile(regex);
 
+            // Linear search
             StringBuilder response = new StringBuilder();
             for (int i = 0; i < this.DBLines.length; i++) {
                 if (types.length == 0) {
